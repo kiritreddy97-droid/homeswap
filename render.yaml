@@ -6,6 +6,19 @@ services:
     plan: free
     healthCheckPath: /health
     envVars:
+      # Staging until an SMS/email OTP provider is wired in: ENV=production refuses to boot with the console OTP
+      # sender (it logs login codes). Switch to production once OTP_SENDER is a real provider.
+      - key: ENV
+        value: staging
+      - key: OTP_SENDER
+        value: console
+      - key: JWT_SECRET
+        generateValue: true
+      # Owner sets these in the Render dashboard (never commit them):
+      - key: ADMIN_CONTACTS # comma-separated emails/phones that become admins on first login
+        sync: false
+      - key: KYC_WEBHOOK_SECRET # shared secret agreed with the KYC provider
+        sync: false
       - key: DATABASE_URL
         fromDatabase:
           name: homeswap-db

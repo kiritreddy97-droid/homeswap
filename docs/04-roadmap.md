@@ -7,10 +7,13 @@
 ## Phase 1 - Closed beta (weeks 5-12)
 - KYC + property verification
 - Listings, points ledger, swap flow (this repo's backend)
+- Done: OTP login + JWT, roles, admin/webhook-only verification, Alembic migrations, rate limiting, structured logs
+- Remaining before beta: real OTP and KYC providers, Render deploy (see `03-architecture.md`)
 - Manual concierge for the first 100 swaps
 
 ## Phase 2 - Launch (months 4-6)
-- Mobile app, reviews, damage protection
+- Mobile app, payments
+- Done early in the backend: reviews and damage-claim records; claim settlement still needs a legal/insurance decision
 - Open to 10 cities
 - Paid membership
 

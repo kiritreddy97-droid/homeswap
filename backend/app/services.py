@@ -3,9 +3,11 @@ from datetime import date
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from .models import Home, PointsLedger, Swap, User
+from .models import DamageClaim, Home, PointsLedger, Review, Swap, User
+from .timeutil import now, today
 
 LISTING_BONUS = 200  # one-time points for a verified home, so new members can travel first
+CLAIM_WINDOW_DAYS = 14  # hosts can file a damage claim this long after checkout
 
 
 class SwapError(Exception):
@@ -48,6 +50,8 @@ def request_swap(db: Session, guest: User, home: Home, start: date, end: date) -
         raise SwapError("home is not verified")
     if home.owner_id == guest.id:
         raise SwapError("cannot stay in your own home")
+    if start < today():
+        raise SwapError("stay cannot start in the past")
     cost = nights(start, end) * home.points_per_night
     if balance(db, guest.id) < cost:
         raise SwapError("insufficient points")
@@ -84,3 +88,74 @@ def cancel_swap(db: Session, swap: Swap) -> Swap:
     swap.status = "cancelled"
     db.flush()
     return swap
+
+
+def complete_swap(db: Session, swap: Swap) -> Swap:
+    """Marks an approved stay as completed once checkout has passed; unlocks reviews and damage claims."""
+    if swap.status != "approved":
+        raise SwapError(f"swap is {swap.status}")
+    if swap.end > today():
+        raise SwapError("stay has not ended yet")
+    swap.status = "completed"
+    db.flush()
+    return swap
+
+
+def add_review(db: Session, swap: Swap, reviewer: User, rating: int, comment: str) -> Review:
+    if swap.status != "completed":
+        raise SwapError("reviews are only allowed after a completed stay")
+    host_id = swap.home.owner_id
+    if reviewer.id == swap.guest_id:
+        reviewee_id = host_id
+    elif reviewer.id == host_id:
+        reviewee_id = swap.guest_id
+    else:
+        raise SwapError("only participants of the stay can review it")
+    if not 1 <= rating <= 5:
+        raise SwapError("rating must be between 1 and 5")
+    if db.scalar(select(Review.id).where(Review.swap_id == swap.id, Review.reviewer_id == reviewer.id)):
+        raise SwapError("you already reviewed this stay")
+    review = Review(
+        swap_id=swap.id, reviewer_id=reviewer.id, reviewee_id=reviewee_id, home_id=swap.home_id,
+        rating=rating, comment=comment,
+    )  # fmt: skip
+    db.add(review)
+    db.flush()
+    return review
+
+
+def file_damage_claim(db: Session, swap: Swap, claimant: User, description: str, amount: int) -> DamageClaim:
+    if swap.status != "completed":
+        raise SwapError("damage claims are only allowed after a completed stay")
+    if claimant.id != swap.home.owner_id:
+        raise SwapError("only the host can claim damage")
+    if (today() - swap.end).days > CLAIM_WINDOW_DAYS:
+        raise SwapError(f"claims must be filed within {CLAIM_WINDOW_DAYS} days of checkout")
+    if amount < 0:
+        raise SwapError("amount must not be negative")
+    if db.scalar(select(DamageClaim.id).where(DamageClaim.swap_id == swap.id)):
+        raise SwapError("a claim already exists for this stay")
+    claim = DamageClaim(swap_id=swap.id, claimant_id=claimant.id, description=description, amount_claimed=amount)
+    db.add(claim)
+    db.flush()
+    return claim
+
+
+def resolve_damage_claim(
+    db: Session, claim: DamageClaim, admin: User, approve: bool, amount_awarded: int | None, note: str
+) -> DamageClaim:
+    if claim.status != "open":
+        raise SwapError(f"claim is {claim.status}")
+    if approve:
+        awarded = claim.amount_claimed if amount_awarded is None else amount_awarded
+        if not 0 <= awarded <= claim.amount_claimed:
+            raise SwapError("awarded amount must be between 0 and the claimed amount")
+        claim.amount_awarded = awarded
+    else:
+        claim.amount_awarded = 0
+    claim.status = "approved" if approve else "rejected"
+    claim.resolution_note = note
+    claim.resolved_by = admin.id
+    claim.resolved_at = now()
+    db.flush()
+    return claim
