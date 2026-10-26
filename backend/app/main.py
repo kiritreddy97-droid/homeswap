@@ -1,10 +1,13 @@
 import hashlib
 import hmac
 import logging
+import os
 from contextlib import asynccontextmanager
 from datetime import date
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -125,7 +128,8 @@ def _swap_for(db: Session, swap_id: int, user: User, *, host_only: bool = False)
 
 def _swap_out(s: Swap) -> dict:
     return {
-        "id": s.id, "guest_id": s.guest_id, "home_id": s.home_id, "start": s.start, "end": s.end,
+        "id": s.id, "guest_id": s.guest_id, "home_id": s.home_id, "home_title": s.home.title, "city": s.home.city,
+        "host_id": s.home.owner_id, "start": s.start, "end": s.end,
         "points_cost": s.points_cost, "status": s.status,
     }  # fmt: skip
 
@@ -142,6 +146,13 @@ def _claim_out(c: DamageClaim) -> dict:
         "id": c.id, "swap_id": c.swap_id, "claimant_id": c.claimant_id, "description": c.description,
         "amount_claimed": c.amount_claimed, "status": c.status, "amount_awarded": c.amount_awarded,
         "resolution_note": c.resolution_note, "created_at": c.created_at, "resolved_at": c.resolved_at,
+    }  # fmt: skip
+
+
+def _home_out(h: Home) -> dict:
+    return {
+        "id": h.id, "city": h.city, "title": h.title, "bedrooms": h.bedrooms, "max_guests": h.max_guests,
+        "points_per_night": h.points_per_night, "property_verified": h.property_verified,
     }  # fmt: skip
 
 
@@ -228,6 +239,22 @@ def admin_verify_user(user_id: int, _: User = Depends(auth.require_admin), db: S
     return {"id_verified": True}
 
 
+@app.get("/admin/users")
+def admin_users(id_verified: bool | None = None, _: User = Depends(auth.require_admin), db: Session = Depends(get_db)):
+    q = select(User).order_by(User.id)
+    if id_verified is not None:
+        q = q.where(User.id_verified.is_(id_verified))
+    return [_user_out(u) for u in db.scalars(q)]
+
+
+@app.get("/admin/homes")
+def admin_homes(verified: bool | None = None, _: User = Depends(auth.require_admin), db: Session = Depends(get_db)):
+    q = select(Home).order_by(Home.id)
+    if verified is not None:
+        q = q.where(Home.property_verified.is_(verified))
+    return [{**_home_out(h), "owner_id": h.owner_id} for h in db.scalars(q)]
+
+
 @app.post("/admin/homes/{home_id}/verify")
 def admin_verify_home(home_id: int, _: User = Depends(auth.require_admin), db: Session = Depends(get_db)):
     services.verify_home(db, _get(db, Home, home_id))
@@ -261,6 +288,11 @@ def my_swaps(user: User = Depends(auth.current_user), db: Session = Depends(get_
     return [_swap_out(s) for s in db.scalars(q)]
 
 
+@app.get("/me/homes")
+def my_homes(user: User = Depends(auth.current_user), db: Session = Depends(get_db)):
+    return [_home_out(h) for h in db.scalars(select(Home).where(Home.owner_id == user.id).order_by(Home.id))]
+
+
 @app.get("/users/{user_id}/balance")
 def get_balance(user_id: int, user: User = Depends(auth.current_user), db: Session = Depends(get_db)):
     if user_id != user.id and user.role != "admin":
@@ -290,10 +322,7 @@ def list_homes(city: str | None = None, _: User = Depends(auth.current_user), db
     q = select(Home).where(Home.property_verified.is_(True))
     if city:
         q = q.where(Home.city.ilike(city))
-    return [
-        {"id": h.id, "city": h.city, "title": h.title, "bedrooms": h.bedrooms, "points_per_night": h.points_per_night}
-        for h in db.scalars(q)
-    ]
+    return [_home_out(h) for h in db.scalars(q)]
 
 
 @app.get("/homes/{home_id}/reviews")
@@ -393,3 +422,9 @@ def resolve_claim(
     )  # fmt: skip
     db.commit()
     return _claim_out(claim)
+
+
+# The web client is plain static files served from the same origin (no CORS, no build step).
+_WEB_DIR = Path(os.getenv("WEB_DIR", Path(__file__).resolve().parents[2] / "web" / "app"))
+if _WEB_DIR.is_dir():
+    app.mount("/app", StaticFiles(directory=_WEB_DIR, html=True), name="web")

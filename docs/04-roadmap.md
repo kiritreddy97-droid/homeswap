@@ -8,6 +8,7 @@
 - KYC + property verification
 - Listings, points ledger, swap flow (this repo's backend)
 - Done: OTP login + JWT, roles, admin/webhook-only verification, Alembic migrations, rate limiting, structured logs
+- Done: simple web client at `/app/` (login, browse, stays, reviews, claims, admin)
 - Remaining before beta: real OTP and KYC providers, Render deploy (see `03-architecture.md`)
 - Manual concierge for the first 100 swaps
 

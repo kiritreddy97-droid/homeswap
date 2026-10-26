@@ -436,3 +436,32 @@ def test_unhandled_error_is_500_json_and_logged(client, caplog, monkeypatch):
     r = client.post("/auth/otp/request", json={"identifier": "e@example.in"})
     assert r.status_code == 500 and r.json() == {"detail": "internal server error"}
     assert any("unhandled error" in rec.getMessage() for rec in caplog.records)
+
+
+# ---------- web client support ----------
+
+
+def test_my_homes_and_admin_lists(client, world, admin, make_member):
+    host = world["host"]
+    pending_id = host.post("/homes", {"city": "Goa", "title": "Pending"}).json()["id"]
+    mine = host.get("/me/homes").json()
+    assert [(h["title"], h["property_verified"]) for h in mine] == [("Beach flat", True), ("Pending", False)]
+    assert world["guest"].get("/me/homes").json()[0]["title"] == "Bandra 2BHK"
+    assert [h["id"] for h in admin.get("/admin/homes", params={"verified": "false"}).json()] == [pending_id]
+    assert len(admin.get("/admin/homes").json()) == 3
+    newbie = make_member("n@example.in", "N", verified=False)
+    assert {u["id"] for u in admin.get("/admin/users", params={"id_verified": "false"}).json()} == {newbie.id, admin.id}
+    assert host.get("/admin/homes").status_code == 403
+    assert host.get("/admin/users").status_code == 403
+
+
+def test_swap_listing_includes_display_fields(client, world):
+    world["guest"].post("/swaps", swap_body(world["home_id"]))
+    s = world["guest"].get("/me/swaps").json()[0]
+    assert (s["home_title"], s["city"], s["host_id"]) == ("Beach flat", "Goa", world["host"].id)
+
+
+def test_web_client_is_served_statically(client):
+    r = client.get("/app/")
+    assert r.status_code == 200 and "HomeSwap" in r.text
+    assert client.get("/app/app.js").status_code == 200
