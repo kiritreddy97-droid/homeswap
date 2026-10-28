@@ -5,8 +5,9 @@
 - Home listings with calendar and house rules
 - Points ledger (append-only) with listing bonus
 - Swap request, host approval, cancellation with refund
-- Reviews after stay (phase 2)
-- Damage-protection claims workflow (phase 2)
+- Reviews after a completed stay (implemented): guest and host each review once; ratings 1-5
+- Damage claims workflow (implemented as a record): host files within 14 days of checkout, an admin approves or rejects; no automatic settlement
+- Login by phone/email OTP; roles member and admin
 
 ## Personas
 - Leisure travellers (25-45) with a home in a metro or tourist city
